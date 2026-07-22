@@ -101,12 +101,20 @@ func (m *Manager) MarkAnswered(id string) {
 	}
 }
 
-func (m *Manager) MarkEnded(id string) {
+func (m *Manager) MarkEnded(id string) (call *Call, newlyEnded bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if call, ok := m.calls[id]; ok {
-		call.State = StateEnded
-		now := time.Now().UTC()
-		call.EndedAt = &now
+	existing, ok := m.calls[id]
+	if !ok {
+		return nil, false
 	}
+	if existing.State == StateEnded {
+		copied := *existing
+		return &copied, false
+	}
+	existing.State = StateEnded
+	now := time.Now().UTC()
+	existing.EndedAt = &now
+	copied := *existing
+	return &copied, true
 }

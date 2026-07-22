@@ -24,8 +24,10 @@ type Config struct {
 	MediaEnabled      bool
 	MediaBindHost     string
 	MediaAdvertiseHost string
-	RTPPortMin        int
-	RTPPortMax        int
+	RTPPortMin         int
+	RTPPortMax         int
+	CdrWebhookURL      string
+	CdrWebhookSecret   string
 }
 
 // Load reads optional .env files and environment variables.
@@ -46,6 +48,8 @@ func Load() (Config, error) {
 		MediaEnabled:       parseBool(getEnv("MEDIA_ENABLED", "true"), true),
 		MediaBindHost:      getEnv("MEDIA_BIND_HOST", "0.0.0.0"),
 		MediaAdvertiseHost: getEnv("MEDIA_ADVERTISE_HOST", getEnv("SIP_ADVERTISED_HOST", "127.0.0.1")),
+		CdrWebhookURL:      getEnv("CDR_WEBHOOK_URL", "http://127.0.0.1:3001/api/calls/cdr"),
+		CdrWebhookSecret:   getEnv("CDR_WEBHOOK_SECRET", "kvoip-cdr-dev"),
 	}
 
 	buffer, err := strconv.Atoi(getEnv("SIP_BUFFER_SIZE", "8192"))

@@ -40,6 +40,8 @@ docs/              notas de arquitetura
 | `MEDIA_BIND_HOST` | `0.0.0.0` | Bind dos sockets RTP |
 | `MEDIA_ADVERTISE_HOST` | `SIP_ADVERTISED_HOST` | IP anunciado no SDP |
 | `RTP_PORT_MIN` / `RTP_PORT_MAX` | `10000` / `20000` | Faixa de portas RTP |
+| `CDR_WEBHOOK_URL` | Nest `/api/calls/cdr` | Envia CDR no hangup |
+| `CDR_WEBHOOK_SECRET` | `kvoip-cdr-dev` | Header `X-CDR-Secret` |
 
 ## Pré-requisito
 
@@ -70,6 +72,7 @@ make build
 - **API HTTP** em `:8080` para o Nest (`/health`, `/v1/registrations`, `/v1/calls`)
 - **Digest auth** no `REGISTER` (`401` + `WWW-Authenticate`)
 - **RTP relay** com reescrita de SDP (`MEDIA_ENABLED`)
+- **CDR webhook** para o Nest no hangup
 - Destino inexistente → `404 Not Found`
 
 ## Testar ligação 1001 → 1002

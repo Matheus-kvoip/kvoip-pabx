@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TypeOrmModule, type TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { PbxModule } from '../pbx/pbx.module';
@@ -9,6 +9,7 @@ import { CallRecordEntity } from './entities/call-record.entity';
 import { ExtensionEntity } from './entities/extension.entity';
 import { TrunkEntity } from './entities/trunk.entity';
 import { UserEntity } from './entities/user.entity';
+import { InitialSchema1742600000000 } from './migrations/1742600000000-InitialSchema';
 
 const entities = [UserEntity, ExtensionEntity, TrunkEntity, CallRecordEntity];
 
@@ -17,24 +18,36 @@ const entities = [UserEntity, ExtensionEntity, TrunkEntity, CallRecordEntity];
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
+      useFactory: (config: ConfigService): TypeOrmModuleOptions => {
         const dbType = (
           config.get<string>('DB_TYPE', 'sqlite') || 'sqlite'
         ).toLowerCase();
-        const common = {
-          entities,
-          synchronize: config.get<string>('DB_SYNC', 'true') !== 'false',
-          logging: config.get<string>('DB_LOGGING', 'false') === 'true',
-        };
+        const isPostgres = dbType === 'postgres' || dbType === 'postgresql';
+        const syncExplicit = config.get<string>('DB_SYNC');
+        const synchronize =
+          syncExplicit !== undefined
+            ? syncExplicit === 'true'
+            : !isPostgres;
+        const migrationsRun =
+          (config.get<string>('DB_MIGRATIONS_RUN') ??
+            (isPostgres ? 'true' : 'false')) === 'true';
+        const logging = config.get<string>('DB_LOGGING', 'false') === 'true';
 
-        if (dbType === 'postgres' || dbType === 'postgresql') {
+        if (isPostgres) {
           const url = config.get<string>('DATABASE_URL');
+          const base: TypeOrmModuleOptions = {
+            type: 'postgres',
+            entities,
+            migrations: [InitialSchema1742600000000],
+            synchronize,
+            migrationsRun,
+            logging,
+          };
           if (url) {
-            return { ...common, type: 'postgres' as const, url };
+            return { ...base, url };
           }
           return {
-            ...common,
-            type: 'postgres' as const,
+            ...base,
             host: config.get<string>('DB_HOST', '127.0.0.1'),
             port: Number(config.get<string>('DB_PORT', '5432')),
             username: config.get<string>('DB_USER', 'kvoip'),
@@ -49,11 +62,14 @@ const entities = [UserEntity, ExtensionEntity, TrunkEntity, CallRecordEntity];
         );
         mkdirSync(dirname(database), { recursive: true });
         return {
-          ...common,
-          type: 'sqljs' as const,
+          type: 'sqljs',
           location: database,
           autoSave: true,
-          autoSaveInterval: 1000,
+          entities,
+          migrations: [InitialSchema1742600000000],
+          synchronize,
+          migrationsRun,
+          logging,
         };
       },
     }),

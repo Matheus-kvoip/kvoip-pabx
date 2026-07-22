@@ -28,6 +28,8 @@ services:
     environment:
       SIP_ADVERTISED_HOST: ${SIP_ADVERTISED_HOST:-127.0.0.1}
       MEDIA_ADVERTISE_HOST: ${MEDIA_ADVERTISE_HOST:-127.0.0.1}
+      CDR_WEBHOOK_URL: http://api:3001/api/calls/cdr
+      CDR_WEBHOOK_SECRET: ${CDR_WEBHOOK_SECRET:-kvoip-cdr-dev}
     restart: unless-stopped
 
   api:
@@ -43,6 +45,9 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
       DATABASE_URL: postgres://${DB_USER:-kvoip}:${DB_PASSWORD:-kvoip}@db:5432/${DB_NAME:-kvoip}
       DB_TYPE: postgres
+      DB_SYNC: "false"
+      DB_MIGRATIONS_RUN: "true"
+      CDR_WEBHOOK_SECRET: ${CDR_WEBHOOK_SECRET:-kvoip-cdr-dev}
       PBX_URL: http://pbx:8080
       PBX_ENABLED: "true"
     depends_on:

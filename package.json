@@ -25,5 +25,11 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "overrides": {
+    "typeorm": "0.3.21"
+  },
+  "dependencies": {
+    "typeorm": "0.3.21"
   }
 }

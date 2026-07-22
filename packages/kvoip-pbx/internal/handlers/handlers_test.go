@@ -24,14 +24,14 @@ func newDispatcher() *handlers.Dispatcher {
 		SIPPort:           "5060",
 		AuthEnabled:       false,
 	}
-	return handlers.NewDispatcher(logger, proxy.NewRouter(), session.NewManager(), dialog.NewManager(), cfg, nil)
+	return handlers.NewDispatcher(logger, proxy.NewRouter(), session.NewManager(), dialog.NewManager(), cfg, nil, nil)
 }
 
 func TestRegisterStoresLocation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	router := proxy.NewRouter()
 	cfg := config.Config{SIPAdvertisedHost: "127.0.0.1", SIPPort: "5060", AuthEnabled: false}
-	d := handlers.NewDispatcher(logger, router, session.NewManager(), dialog.NewManager(), cfg, nil)
+	d := handlers.NewDispatcher(logger, router, session.NewManager(), dialog.NewManager(), cfg, nil, nil)
 
 	var replied []byte
 	req := sip.Parse([]byte("REGISTER sip:kvoip.local SIP/2.0\r\n" +
@@ -74,7 +74,7 @@ func TestRegisterDigestChallengeAndSuccess(t *testing.T) {
 		AuthRealm:         "kvoip.local",
 		SIPUsers:          map[string]string{"1001": "secret"},
 	}
-	d := handlers.NewDispatcher(logger, router, session.NewManager(), dialog.NewManager(), cfg, nil)
+	d := handlers.NewDispatcher(logger, router, session.NewManager(), dialog.NewManager(), cfg, nil, nil)
 
 	var replies []string
 	base := "REGISTER sip:kvoip.local SIP/2.0\r\n" +
@@ -189,7 +189,7 @@ func TestInviteProxiesToRegisteredContact(t *testing.T) {
 		Expires: 3600,
 	})
 	cfg := config.Config{SIPAdvertisedHost: "127.0.0.1", SIPPort: "5060", AuthEnabled: false}
-	d := handlers.NewDispatcher(logger, router, session.NewManager(), dialog.NewManager(), cfg, nil)
+	d := handlers.NewDispatcher(logger, router, session.NewManager(), dialog.NewManager(), cfg, nil, nil)
 
 	var replies []string
 	var forwarded []byte

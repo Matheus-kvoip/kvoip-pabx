@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kvoip/kvoip-pbx/internal/api"
+	"github.com/kvoip/kvoip-pbx/internal/cdr"
 	"github.com/kvoip/kvoip-pbx/internal/config"
 	"github.com/kvoip/kvoip-pbx/internal/dialog"
 	"github.com/kvoip/kvoip-pbx/internal/handlers"
@@ -42,6 +43,7 @@ func main() {
 		"users", len(cfg.SIPUsers),
 		"media", cfg.MediaEnabled,
 		"rtp", fmt.Sprintf("%d-%d", cfg.RTPPortMin, cfg.RTPPortMax),
+		"cdr", cfg.CdrWebhookURL != "",
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -60,7 +62,8 @@ func main() {
 			cfg.RTPPortMax,
 		)
 	}
-	dispatcher := handlers.NewDispatcher(logger, router, sessions, dialogs, cfg, mediaEngine)
+	cdrNotifier := cdr.NewNotifier(cfg.CdrWebhookURL, cfg.CdrWebhookSecret, logger)
+	dispatcher := handlers.NewDispatcher(logger, router, sessions, dialogs, cfg, mediaEngine, cdrNotifier)
 	sipServer := server.New(cfg, logger, dispatcher)
 
 	httpAPI := api.New(cfg, logger, router, sessions, dispatcher.Digest())

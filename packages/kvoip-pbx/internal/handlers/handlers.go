@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kvoip/kvoip-pbx/internal/auth"
+	"github.com/kvoip/kvoip-pbx/internal/cdr"
 	"github.com/kvoip/kvoip-pbx/internal/config"
 	"github.com/kvoip/kvoip-pbx/internal/dialog"
 	"github.com/kvoip/kvoip-pbx/internal/media"
@@ -33,6 +34,7 @@ type Dispatcher struct {
 	cfg      config.Config
 	digest   *auth.Digest
 	media    *media.Engine
+	cdr      *cdr.Notifier
 }
 
 func NewDispatcher(
@@ -42,6 +44,7 @@ func NewDispatcher(
 	dialogs *dialog.Manager,
 	cfg config.Config,
 	mediaEngine *media.Engine,
+	cdrNotifier *cdr.Notifier,
 ) *Dispatcher {
 	var digest *auth.Digest
 	if cfg.AuthEnabled {
@@ -55,6 +58,7 @@ func NewDispatcher(
 		cfg:      cfg,
 		digest:   digest,
 		media:    mediaEngine,
+		cdr:      cdrNotifier,
 	}
 }
 
@@ -270,11 +274,8 @@ func (d *Dispatcher) handleBye(pkt Packet) error {
 	}
 
 	// end locally; final 200 from peer is still relayed via handleResponse
-	d.sessions.MarkEnded(leg.CallID)
+	d.finishCall(leg.CallID)
 	leg.State = dialog.StateTerminated
-	if d.media != nil {
-		d.media.Close(leg.CallID)
-	}
 	d.logger.Info("BYE proxy", "call_id", leg.CallID, "to", target.String())
 	return nil
 }
@@ -293,6 +294,7 @@ func (d *Dispatcher) handleCancel(pkt Packet) error {
 	if d.media != nil {
 		d.media.Close(leg.CallID)
 	}
+	d.finishCall(leg.CallID)
 	d.logger.Info("CANCEL proxy", "call_id", leg.CallID)
 	return pkt.SendTo(forwarded, leg.CalleeAddr)
 }
@@ -344,18 +346,12 @@ func (d *Dispatcher) handleResponse(pkt Packet) error {
 		}
 		if strings.Contains(cseq, "BYE") {
 			leg.State = dialog.StateTerminated
-			d.sessions.MarkEnded(callID)
-			if d.media != nil {
-				d.media.Close(callID)
-			}
+			d.finishCall(callID)
 			d.dialogs.Delete(callID)
 		}
 	case msg.StatusCode >= 300:
-		d.sessions.MarkEnded(callID)
+		d.finishCall(callID)
 		leg.State = dialog.StateTerminated
-		if d.media != nil {
-			d.media.Close(callID)
-		}
 	}
 
 	forwarded := sip.ForwardResponse(fwd)
@@ -381,6 +377,16 @@ func (d *Dispatcher) rewriteAnswerSDP(callID string, msg sip.Message) sip.Messag
 	out := msg
 	out.Body = media.RewriteAudio(msg.Body, d.media.AdvertiseHost(), bridge.CallerRTPPort())
 	return out
+}
+
+func (d *Dispatcher) finishCall(callID string) {
+	call, newlyEnded := d.sessions.MarkEnded(callID)
+	if d.media != nil {
+		d.media.Close(callID)
+	}
+	if newlyEnded && call != nil && d.cdr != nil {
+		d.cdr.NotifyEnded(*call)
+	}
 }
 
 func sameEndpoint(a, b *net.UDPAddr) bool {
