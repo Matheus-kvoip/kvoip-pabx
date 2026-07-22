@@ -2,11 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/kvoip/kvoip-pbx/internal/auth"
 	"github.com/kvoip/kvoip-pbx/internal/config"
 	"github.com/kvoip/kvoip-pbx/internal/proxy"
 	"github.com/kvoip/kvoip-pbx/internal/session"
@@ -19,15 +21,23 @@ type Server struct {
 	logger   *slog.Logger
 	router   *proxy.Router
 	sessions *session.Manager
+	digest   *auth.Digest
 	started  time.Time
 }
 
-func New(cfg config.Config, logger *slog.Logger, router *proxy.Router, sessions *session.Manager) *Server {
+func New(
+	cfg config.Config,
+	logger *slog.Logger,
+	router *proxy.Router,
+	sessions *session.Manager,
+	digest *auth.Digest,
+) *Server {
 	return &Server{
 		cfg:      cfg,
 		logger:   logger,
 		router:   router,
 		sessions: sessions,
+		digest:   digest,
 		started:  time.Now().UTC(),
 	}
 }
@@ -37,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/v1/registrations", s.handleRegistrations)
 	mux.HandleFunc("/v1/calls", s.handleCalls)
+	mux.HandleFunc("/v1/sip-users", s.handleSipUsers)
 	return withCORS(mux)
 }
 
@@ -45,15 +56,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	users := 0
+	if s.digest != nil {
+		users = s.digest.UserCount()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":    "ok",
-		"service":   s.cfg.ServiceName,
-		"version":   version.Version,
-		"uptimeSec": int(time.Since(s.started).Seconds()),
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"sip":       s.cfg.ListenAddr(),
-		"bindings":  s.router.Count(),
+		"status":      "ok",
+		"service":     s.cfg.ServiceName,
+		"version":     version.Version,
+		"uptimeSec":   int(time.Since(s.started).Seconds()),
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		"sip":         s.cfg.ListenAddr(),
+		"bindings":    s.router.Count(),
 		"activeCalls": s.sessions.ActiveCount(),
+		"sipUsers":    users,
 	})
 }
 
@@ -143,6 +159,34 @@ func (s *Server) handleCalls(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+type sipUsersBody struct {
+	Users map[string]string `json:"users"`
+}
+
+func (s *Server) handleSipUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.digest == nil {
+		http.Error(w, "auth disabled", http.StatusConflict)
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	var body sipUsersBody
+	if err := json.Unmarshal(raw, &body); err != nil || body.Users == nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	s.digest.ReplaceUsers(auth.Credentials(body.Users))
+	s.logger.Info("sip users atualizados via API", "count", len(body.Users))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(body.Users)})
+}
+
 func trimUser(aor string) string {
 	aor = strings.TrimPrefix(aor, "sip:")
 	if i := strings.Index(aor, "@"); i >= 0 {
@@ -160,7 +204,7 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

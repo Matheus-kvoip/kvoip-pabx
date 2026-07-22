@@ -1,55 +1,48 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import type { Trunk } from '@kvoip/shared';
+import { Repository } from 'typeorm';
+import { TrunkEntity } from '../database/entities/trunk.entity';
 
 @Injectable()
 export class TrunksService {
-  private readonly trunks: Trunk[] = [
-    {
-      id: 'trk-primary',
-      name: 'Tronco Principal',
-      host: 'sip.operadora.com.br',
-      port: 5060,
-      protocol: 'udp',
-      status: 'up',
-      concurrentCalls: 4,
-      maxChannels: 30,
-    },
-    {
-      id: 'trk-backup',
-      name: 'Tronco Backup',
-      host: 'backup.sip.kvoip.local',
-      port: 5061,
-      protocol: 'tls',
-      status: 'up',
-      concurrentCalls: 0,
-      maxChannels: 10,
-    },
-    {
-      id: 'trk-mobile',
-      name: 'Tronco Móvel',
-      host: 'gw-mobile.kvoip.local',
-      port: 5060,
-      protocol: 'tcp',
-      status: 'degraded',
-      concurrentCalls: 2,
-      maxChannels: 8,
-    },
-  ];
+  constructor(
+    @InjectRepository(TrunkEntity)
+    private readonly repo: Repository<TrunkEntity>,
+  ) {}
 
-  findAll(): Trunk[] {
-    return this.trunks;
+  async findAll(): Promise<Trunk[]> {
+    const rows = await this.repo.find({
+      where: { enabled: true },
+      order: { name: 'ASC' },
+    });
+    return rows.map((row) => this.toDto(row));
   }
 
-  findOne(id: string): Trunk {
-    const trunk = this.trunks.find((item) => item.id === id);
-    if (!trunk) {
+  async findOne(id: string): Promise<Trunk> {
+    const row = await this.repo.findOne({ where: { id } });
+    if (!row) {
       throw new NotFoundException(`Tronco ${id} não encontrado`);
     }
-    return trunk;
+    return this.toDto(row);
   }
 
-  countByStatus() {
-    const up = this.trunks.filter((item) => item.status === 'up').length;
-    return { up, total: this.trunks.length };
+  async countByStatus() {
+    const rows = await this.findAll();
+    const up = rows.filter((item) => item.status === 'up').length;
+    return { up, total: rows.length };
+  }
+
+  private toDto(row: TrunkEntity): Trunk {
+    return {
+      id: row.id,
+      name: row.name,
+      host: row.host,
+      port: row.port,
+      protocol: row.protocol as Trunk['protocol'],
+      status: row.status as Trunk['status'],
+      concurrentCalls: row.concurrentCalls,
+      maxChannels: row.maxChannels,
+    };
   }
 }

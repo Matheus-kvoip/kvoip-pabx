@@ -1,32 +1,29 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import type { CallRecord } from '@kvoip/shared';
+import { Repository } from 'typeorm';
+import { CallRecordEntity } from '../database/entities/call-record.entity';
 import { PbxClient } from '../pbx/pbx.client';
 
 @Injectable()
 export class CallsService {
-  private readonly history: CallRecord[] = [
-    {
-      id: 'call-history-1',
-      direction: 'inbound',
-      state: 'ended',
-      from: '11987654321',
-      to: '1001',
-      startedAt: '2026-07-21T18:10:00.000Z',
-      answeredAt: '2026-07-21T18:10:12.000Z',
-      endedAt: '2026-07-21T18:18:40.000Z',
-      durationSec: 508,
-    },
-  ];
-
-  constructor(private readonly pbx: PbxClient) {}
+  constructor(
+    @InjectRepository(CallRecordEntity)
+    private readonly repo: Repository<CallRecordEntity>,
+    private readonly pbx: PbxClient,
+  ) {}
 
   async findAll(): Promise<CallRecord[]> {
     const live = await this.pbx.getCalls(false);
-    if (live.length === 0) {
-      return [...this.history];
-    }
+    await this.persistEnded(live);
+
+    const history = await this.repo.find({
+      order: { startedAt: 'DESC' },
+      take: 200,
+    });
+    const historyDto = history.map((row) => this.toDto(row));
     const ids = new Set(live.map((c) => c.id));
-    return [...live, ...this.history.filter((c) => !ids.has(c.id))];
+    return [...live, ...historyDto.filter((c) => !ids.has(c.id))];
   }
 
   async findActive(): Promise<CallRecord[]> {
@@ -38,7 +35,11 @@ export class CallsService {
   async statsToday() {
     const all = await this.findAll();
     const active = all.filter((call) => call.state !== 'ended').length;
-    const today = all.length;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const today = all.filter(
+      (call) => new Date(call.startedAt).getTime() >= startOfDay.getTime(),
+    ).length;
     const answered = all.filter((call) => call.answeredAt);
     const avgAnswerSec =
       answered.length === 0
@@ -51,5 +52,40 @@ export class CallsService {
             }, 0) / answered.length,
           );
     return { active, today, avgAnswerSec };
+  }
+
+  private async persistEnded(live: CallRecord[]) {
+    const ended = live.filter((c) => c.state === 'ended');
+    for (const call of ended) {
+      const exists = await this.repo.findOne({ where: { id: call.id } });
+      if (exists) continue;
+      await this.repo.save(
+        this.repo.create({
+          id: call.id,
+          direction: call.direction,
+          state: call.state,
+          from: call.from,
+          to: call.to,
+          startedAt: new Date(call.startedAt),
+          answeredAt: call.answeredAt ? new Date(call.answeredAt) : null,
+          endedAt: call.endedAt ? new Date(call.endedAt) : null,
+          durationSec: call.durationSec,
+        }),
+      );
+    }
+  }
+
+  private toDto(row: CallRecordEntity): CallRecord {
+    return {
+      id: row.id,
+      direction: row.direction as CallRecord['direction'],
+      state: row.state as CallRecord['state'],
+      from: row.from,
+      to: row.to,
+      startedAt: row.startedAt.toISOString(),
+      answeredAt: row.answeredAt?.toISOString(),
+      endedAt: row.endedAt?.toISOString(),
+      durationSec: row.durationSec,
+    };
   }
 }

@@ -8,6 +8,7 @@ import { ExtensionsModule } from './extensions/extensions.module';
 import { TrunksModule } from './trunks/trunks.module';
 import { CallsModule } from './calls/calls.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { DatabaseModule } from './database/database.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
       isGlobal: true,
       envFilePath: ['.env', '.env.local'],
     }),
+    DatabaseModule,
     AuthModule,
     HealthModule,
     ExtensionsModule,

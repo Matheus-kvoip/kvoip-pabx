@@ -13,6 +13,8 @@
     "dev:server": "npm run start:dev -w kvoip-server",
     "dev:front": "npm run dev -w kvoip-front",
     "dev:pbx": "npm run pbx:run",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose stop db",
     "pbx:run": "cd packages/kvoip-pbx && go run ./cmd/kvoip-pbx",
     "pbx:build": "cd packages/kvoip-pbx && go build -o bin/kvoip-pbx ./cmd/kvoip-pbx",
     "pbx:test": "cd packages/kvoip-pbx && go test ./...",

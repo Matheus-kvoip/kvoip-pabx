@@ -1,12 +1,33 @@
 services:
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-kvoip}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-kvoip}
+      POSTGRES_DB: ${DB_NAME:-kvoip}
+    volumes:
+      - kvoip_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-kvoip} -d ${DB_NAME:-kvoip}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   pbx:
     build:
       context: .
       dockerfile: docker/Dockerfile.pbx
     ports:
       - "${SIP_PORT:-5060}:5060/udp"
+      - "${PBX_HTTP_PORT:-8080}:8080"
     env_file:
       - packages/kvoip-pbx/.env
+    environment:
+      SIP_ADVERTISED_HOST: ${SIP_ADVERTISED_HOST:-127.0.0.1}
+      MEDIA_ADVERTISE_HOST: ${MEDIA_ADVERTISE_HOST:-127.0.0.1}
     restart: unless-stopped
 
   api:
@@ -20,6 +41,15 @@ services:
     environment:
       PORT: 3001
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
+      DATABASE_URL: postgres://${DB_USER:-kvoip}:${DB_PASSWORD:-kvoip}@db:5432/${DB_NAME:-kvoip}
+      DB_TYPE: postgres
+      PBX_URL: http://pbx:8080
+      PBX_ENABLED: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      pbx:
+        condition: service_started
     restart: unless-stopped
 
   front:
@@ -45,3 +75,6 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+
+volumes:
+  kvoip_pg_data:

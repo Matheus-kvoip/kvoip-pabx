@@ -1,61 +1,26 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import type { CreateExtensionInput, Extension } from '@kvoip/shared';
-import { randomUUID } from 'crypto';
+import { Repository } from 'typeorm';
+import { ExtensionEntity } from '../database/entities/extension.entity';
+import { DatabaseSeedService } from '../database/database.seed';
 import { PbxClient } from '../pbx/pbx.client';
 
 @Injectable()
 export class ExtensionsService {
-  private extensions: Extension[] = [
-    {
-      id: 'ext-1001',
-      number: '1001',
-      displayName: 'Ana Souza',
-      email: 'ana@kvoip.com.br',
-      status: 'offline',
-      device: 'Yealink T46U',
-      createdAt: '2026-01-10T12:00:00.000Z',
-    },
-    {
-      id: 'ext-1002',
-      number: '1002',
-      displayName: 'Bruno Lima',
-      email: 'bruno@kvoip.com.br',
-      status: 'offline',
-      device: 'Softphone',
-      createdAt: '2026-01-12T09:30:00.000Z',
-    },
-    {
-      id: 'ext-1003',
-      number: '1003',
-      displayName: 'Carla Mendes',
-      email: 'carla@kvoip.com.br',
-      status: 'offline',
-      device: 'Grandstream GXP2170',
-      createdAt: '2026-02-01T15:10:00.000Z',
-    },
-    {
-      id: 'ext-1004',
-      number: '1004',
-      displayName: 'Diego Rocha',
-      email: 'diego@kvoip.com.br',
-      status: 'offline',
-      device: 'Softphone',
-      createdAt: '2026-02-18T11:00:00.000Z',
-    },
-    {
-      id: 'ext-2000',
-      number: '2000',
-      displayName: 'Recepção',
-      status: 'offline',
-      device: 'Fila / IVR',
-      createdAt: '2026-01-05T08:00:00.000Z',
-    },
-  ];
-
-  constructor(private readonly pbx: PbxClient) {}
+  constructor(
+    @InjectRepository(ExtensionEntity)
+    private readonly repo: Repository<ExtensionEntity>,
+    private readonly pbx: PbxClient,
+    private readonly seed: DatabaseSeedService,
+  ) {}
 
   async findAll(): Promise<Extension[]> {
-    const directory = [...this.extensions];
+    const directory = await this.repo.find({ order: { number: 'ASC' } });
     const regs = await this.pbx.getRegistrations();
     const byNumber = new Map(regs.map((r) => [r.number, r]));
     const activeCalls = await this.pbx.getCalls(true);
@@ -71,18 +36,19 @@ export class ExtensionsService {
     }
 
     const merged = directory.map((ext) => {
+      const base = this.toDto(ext);
       const reg = byNumber.get(ext.number);
       if (!reg) {
-        return { ...ext, status: 'offline' as const };
+        return { ...base, status: 'offline' as const };
       }
       byNumber.delete(ext.number);
       let status: Extension['status'] = 'online';
       if (busy.has(ext.number)) status = 'busy';
       else if (ringing.has(ext.number)) status = 'ringing';
       return {
-        ...ext,
+        ...base,
         status,
-        device: reg.contact || ext.device,
+        device: reg.contact || base.device,
       };
     });
 
@@ -112,40 +78,58 @@ export class ExtensionsService {
     return extension;
   }
 
-  create(input: CreateExtensionInput): Extension {
-    const extension: Extension = {
-      id: `ext-${randomUUID().slice(0, 8)}`,
-      number: input.number,
-      displayName: input.displayName,
-      email: input.email,
-      device: input.device,
-      status: 'offline',
-      createdAt: new Date().toISOString(),
-    };
-    this.extensions.push(extension);
-    return extension;
+  async create(input: CreateExtensionInput): Promise<Extension> {
+    const exists = await this.repo.findOne({ where: { number: input.number } });
+    if (exists) {
+      throw new ConflictException(`Ramal ${input.number} já existe`);
+    }
+    const entity = await this.repo.save(
+      this.repo.create({
+        number: input.number,
+        displayName: input.displayName,
+        email: input.email ?? null,
+        device: input.device ?? null,
+        sipPassword: input.sipPassword?.trim() || 'kvoip123',
+        enabled: true,
+      }),
+    );
+    await this.seed.syncSipUsers();
+    return this.toDto(entity);
   }
 
-  update(id: string, input: Partial<CreateExtensionInput>): Extension {
-    const extension = this.extensions.find((item) => item.id === id);
-    if (!extension) {
+  async update(
+    id: string,
+    input: Partial<CreateExtensionInput>,
+  ): Promise<Extension> {
+    const entity = await this.repo.findOne({ where: { id } });
+    if (!entity) {
       throw new NotFoundException(`Ramal ${id} não encontrado`);
     }
-    Object.assign(extension, {
-      number: input.number ?? extension.number,
-      displayName: input.displayName ?? extension.displayName,
-      email: input.email ?? extension.email,
-      device: input.device ?? extension.device,
-    });
-    return extension;
+    if (input.number && input.number !== entity.number) {
+      const clash = await this.repo.findOne({ where: { number: input.number } });
+      if (clash) {
+        throw new ConflictException(`Ramal ${input.number} já existe`);
+      }
+      entity.number = input.number;
+    }
+    entity.displayName = input.displayName ?? entity.displayName;
+    entity.email = input.email ?? entity.email;
+    entity.device = input.device ?? entity.device;
+    if (input.sipPassword?.trim()) {
+      entity.sipPassword = input.sipPassword.trim();
+    }
+    await this.repo.save(entity);
+    await this.seed.syncSipUsers();
+    return this.toDto(entity);
   }
 
-  remove(id: string): { ok: true } {
-    const exists = this.extensions.some((item) => item.id === id);
-    if (!exists) {
+  async remove(id: string): Promise<{ ok: true }> {
+    const entity = await this.repo.findOne({ where: { id } });
+    if (!entity) {
       throw new NotFoundException(`Ramal ${id} não encontrado`);
     }
-    this.extensions = this.extensions.filter((item) => item.id !== id);
+    await this.repo.remove(entity);
+    await this.seed.syncSipUsers();
     return { ok: true };
   }
 
@@ -158,5 +142,17 @@ export class ExtensionsService {
         item.status === 'ringing',
     ).length;
     return { online, total: list.length };
+  }
+
+  private toDto(entity: ExtensionEntity): Extension {
+    return {
+      id: entity.id,
+      number: entity.number,
+      displayName: entity.displayName,
+      email: entity.email ?? undefined,
+      device: entity.device ?? undefined,
+      status: 'offline',
+      createdAt: entity.createdAt.toISOString(),
+    };
   }
 }

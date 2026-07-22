@@ -17,7 +17,7 @@ export class DashboardService {
   async getStats(): Promise<DashboardStats & { pbxOnline: boolean }> {
     const [extensions, trunks, calls, pbxOnline] = await Promise.all([
       this.extensionsService.countByStatus(),
-      Promise.resolve(this.trunksService.countByStatus()),
+      this.trunksService.countByStatus(),
       this.callsService.statsToday(),
       this.pbx.health(),
     ]);

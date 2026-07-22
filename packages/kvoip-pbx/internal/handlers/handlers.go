@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kvoip/kvoip-pbx/internal/auth"
 	"github.com/kvoip/kvoip-pbx/internal/config"
 	"github.com/kvoip/kvoip-pbx/internal/dialog"
+	"github.com/kvoip/kvoip-pbx/internal/media"
 	"github.com/kvoip/kvoip-pbx/internal/proxy"
 	"github.com/kvoip/kvoip-pbx/internal/session"
 	"github.com/kvoip/kvoip-pbx/internal/sip"
@@ -29,6 +31,8 @@ type Dispatcher struct {
 	sessions *session.Manager
 	dialogs  *dialog.Manager
 	cfg      config.Config
+	digest   *auth.Digest
+	media    *media.Engine
 }
 
 func NewDispatcher(
@@ -37,13 +41,20 @@ func NewDispatcher(
 	sessions *session.Manager,
 	dialogs *dialog.Manager,
 	cfg config.Config,
+	mediaEngine *media.Engine,
 ) *Dispatcher {
+	var digest *auth.Digest
+	if cfg.AuthEnabled {
+		digest = auth.NewDigest(cfg.AuthRealm, auth.Credentials(cfg.SIPUsers))
+	}
 	return &Dispatcher{
 		logger:   logger,
 		router:   router,
 		sessions: sessions,
 		dialogs:  dialogs,
 		cfg:      cfg,
+		digest:   digest,
+		media:    mediaEngine,
 	}
 }
 
@@ -88,12 +99,30 @@ func (d *Dispatcher) handleRegister(pkt Packet) error {
 	if aor == "" {
 		aor = sip.ExtractAOR(msg.Header("from"))
 	}
+	username := sip.ExtractUser(aor)
+
+	if d.digest != nil {
+		authHeader := msg.Header("authorization")
+		user, ok := d.digest.Validate("REGISTER", authHeader)
+		if !ok {
+			d.logger.Info("REGISTER challenge", "aor", aor, "has_auth", authHeader != "")
+			return pkt.Reply(sip.BuildResponse(msg, 401, "Unauthorized", map[string]string{
+				"WWW-Authenticate": d.digest.ChallengeHeader(),
+			}))
+		}
+		if username != "" && user != username {
+			d.logger.Warn("REGISTER user mismatch", "uri_user", username, "auth_user", user)
+			return pkt.Reply(sip.BuildResponse(msg, 403, "Forbidden", nil))
+		}
+		username = user
+	}
+
 	contact := msg.Header("contact")
 	expires := sip.ContactExpires(contact, msg.Header("expires"), 3600)
 
 	if contact == "" || expires == 0 || contact == "*" {
 		d.router.Unregister(aor)
-		d.logger.Info("REGISTER unregister", "aor", aor)
+		d.logger.Info("REGISTER unregister", "aor", aor, "user", username)
 		return pkt.Reply(sip.BuildResponse(msg, 200, "OK", map[string]string{"Expires": "0"}))
 	}
 
@@ -102,7 +131,13 @@ func (d *Dispatcher) handleRegister(pkt Packet) error {
 		Contact: contact,
 		Expires: expires,
 	})
-	d.logger.Info("REGISTER ok", "aor", aor, "contact", contact, "expires", expires, "bindings", d.router.Count())
+	d.logger.Info("REGISTER ok",
+		"aor", aor,
+		"user", username,
+		"contact", contact,
+		"expires", expires,
+		"bindings", d.router.Count(),
+	)
 	return pkt.Reply(sip.BuildResponse(msg, 200, "OK", map[string]string{
 		"Contact": fmt.Sprintf("%s;expires=%d", contact, expires),
 		"Expires": fmt.Sprintf("%d", expires),
@@ -136,10 +171,23 @@ func (d *Dispatcher) handleInvite(pkt Packet) error {
 		return err
 	}
 
+	fwd := msg
+	if d.cfg.MediaEnabled && d.media != nil && strings.TrimSpace(msg.Body) != "" {
+		bridge, err := d.media.Open(callID)
+		if err != nil {
+			d.logger.Error("rtp bridge failed", "err", err)
+			return pkt.Reply(sip.BuildResponse(msg, 500, "Server Internal Error", nil))
+		}
+		if audio, ok := media.ParseAudio(msg.Body); ok {
+			bridge.SetCallerRemote(audio.IP, audio.Port)
+		}
+		fwd.Body = media.RewriteAudio(msg.Body, d.media.AdvertiseHost(), bridge.CalleeRTPPort())
+	}
+
 	branch := sip.NewBranch(callID + fmt.Sprintf("%d", time.Now().UnixNano()%100000))
 	topVia := fmt.Sprintf("SIP/2.0/UDP %s;branch=%s;rport", d.cfg.AdvertisedAddr(), branch)
 	requestURI := sip.ExtractURI(loc.Contact)
-	forwarded := sip.ForwardRequest(msg, requestURI, topVia)
+	forwarded := sip.ForwardRequest(fwd, requestURI, topVia)
 
 	leg := &dialog.Leg{
 		CallID:     callID,
@@ -164,6 +212,7 @@ func (d *Dispatcher) handleInvite(pkt Packet) error {
 		"from", leg.From,
 		"to", loc.AOR,
 		"callee", calleeAddr.String(),
+		"media", d.cfg.MediaEnabled,
 	)
 
 	return pkt.SendTo(forwarded, calleeAddr)
@@ -223,6 +272,9 @@ func (d *Dispatcher) handleBye(pkt Packet) error {
 	// end locally; final 200 from peer is still relayed via handleResponse
 	d.sessions.MarkEnded(leg.CallID)
 	leg.State = dialog.StateTerminated
+	if d.media != nil {
+		d.media.Close(leg.CallID)
+	}
 	d.logger.Info("BYE proxy", "call_id", leg.CallID, "to", target.String())
 	return nil
 }
@@ -238,6 +290,9 @@ func (d *Dispatcher) handleCancel(pkt Packet) error {
 	branch := sip.NewBranch(msg.Header("call-id") + "-cancel")
 	topVia := fmt.Sprintf("SIP/2.0/UDP %s;branch=%s;rport", d.cfg.AdvertisedAddr(), branch)
 	forwarded := sip.ForwardRequest(msg, leg.CalleeURI, topVia)
+	if d.media != nil {
+		d.media.Close(leg.CallID)
+	}
 	d.logger.Info("CANCEL proxy", "call_id", leg.CallID)
 	return pkt.SendTo(forwarded, leg.CalleeAddr)
 }
@@ -265,6 +320,7 @@ func (d *Dispatcher) handleResponse(pkt Packet) error {
 		return nil
 	}
 
+	fwd := msg
 	switch {
 	case msg.StatusCode >= 180 && msg.StatusCode < 200:
 		leg.State = dialog.StateEarly
@@ -272,6 +328,7 @@ func (d *Dispatcher) handleResponse(pkt Packet) error {
 			call.State = session.StateRinging
 			d.sessions.Upsert(call)
 		}
+		fwd = d.rewriteAnswerSDP(callID, msg)
 	case msg.StatusCode >= 200 && msg.StatusCode < 300:
 		cseq := strings.ToUpper(msg.Header("cseq"))
 		if strings.Contains(cseq, "INVITE") {
@@ -283,24 +340,47 @@ func (d *Dispatcher) handleResponse(pkt Packet) error {
 					leg.CalleeAddr = addr
 				}
 			}
+			fwd = d.rewriteAnswerSDP(callID, msg)
 		}
 		if strings.Contains(cseq, "BYE") {
 			leg.State = dialog.StateTerminated
 			d.sessions.MarkEnded(callID)
+			if d.media != nil {
+				d.media.Close(callID)
+			}
 			d.dialogs.Delete(callID)
 		}
 	case msg.StatusCode >= 300:
 		d.sessions.MarkEnded(callID)
 		leg.State = dialog.StateTerminated
+		if d.media != nil {
+			d.media.Close(callID)
+		}
 	}
 
-	forwarded := sip.ForwardResponse(msg)
+	forwarded := sip.ForwardResponse(fwd)
 	d.logger.Info("SIP response proxy",
 		"call_id", callID,
 		"status", msg.StatusCode,
 		"to", target.String(),
 	)
 	return pkt.SendTo(forwarded, target)
+}
+
+func (d *Dispatcher) rewriteAnswerSDP(callID string, msg sip.Message) sip.Message {
+	if !d.cfg.MediaEnabled || d.media == nil || strings.TrimSpace(msg.Body) == "" {
+		return msg
+	}
+	bridge, ok := d.media.Get(callID)
+	if !ok {
+		return msg
+	}
+	if audio, ok := media.ParseAudio(msg.Body); ok {
+		bridge.SetCalleeRemote(audio.IP, audio.Port)
+	}
+	out := msg
+	out.Body = media.RewriteAudio(msg.Body, d.media.AdvertiseHost(), bridge.CallerRTPPort())
+	return out
 }
 
 func sameEndpoint(a, b *net.UDPAddr) bool {
@@ -319,5 +399,6 @@ func cloneUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
 	return &net.UDPAddr{IP: ip, Port: addr.Port, Zone: addr.Zone}
 }
 
-// ErrNotImplemented is reserved for future hard failures.
-var ErrNotImplemented = fmt.Errorf("não implementado")
+func (d *Dispatcher) Digest() *auth.Digest {
+	return d.digest
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/kvoip/kvoip-pbx/internal/config"
 	"github.com/kvoip/kvoip-pbx/internal/dialog"
 	"github.com/kvoip/kvoip-pbx/internal/handlers"
+	"github.com/kvoip/kvoip-pbx/internal/media"
 	"github.com/kvoip/kvoip-pbx/internal/proxy"
 	"github.com/kvoip/kvoip-pbx/internal/server"
 	"github.com/kvoip/kvoip-pbx/internal/session"
@@ -35,6 +37,11 @@ func main() {
 		"listen", cfg.ListenAddr(),
 		"advertised", cfg.AdvertisedAddr(),
 		"http", cfg.HTTPListenAddr(),
+		"auth", cfg.AuthEnabled,
+		"realm", cfg.AuthRealm,
+		"users", len(cfg.SIPUsers),
+		"media", cfg.MediaEnabled,
+		"rtp", fmt.Sprintf("%d-%d", cfg.RTPPortMin, cfg.RTPPortMax),
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -43,10 +50,20 @@ func main() {
 	router := proxy.NewRouter()
 	sessions := session.NewManager()
 	dialogs := dialog.NewManager()
-	dispatcher := handlers.NewDispatcher(logger, router, sessions, dialogs, cfg)
+	var mediaEngine *media.Engine
+	if cfg.MediaEnabled {
+		mediaEngine = media.NewEngine(
+			logger,
+			cfg.MediaAdvertiseHost,
+			cfg.MediaBindHost,
+			cfg.RTPPortMin,
+			cfg.RTPPortMax,
+		)
+	}
+	dispatcher := handlers.NewDispatcher(logger, router, sessions, dialogs, cfg, mediaEngine)
 	sipServer := server.New(cfg, logger, dispatcher)
 
-	httpAPI := api.New(cfg, logger, router, sessions)
+	httpAPI := api.New(cfg, logger, router, sessions, dispatcher.Digest())
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPListenAddr(),
 		Handler:           httpAPI.Handler(),

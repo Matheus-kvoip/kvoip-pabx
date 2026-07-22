@@ -1,26 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { CallRecord, CallState, Extension } from '@kvoip/shared';
+import {
+  CallDirection,
+  CallState,
+  type CallRecord,
+  type Extension,
+  type PbxCall,
+  type PbxRegistration,
+} from '@kvoip/shared';
 
-type PbxRegistration = {
-  aor: string;
-  number: string;
-  contact: string;
-  expires: number;
-  updatedAt: string;
-};
-
-type PbxCall = {
-  id: string;
-  direction: string;
-  state: string;
-  from: string;
-  to: string;
-  startedAt: string;
-  answeredAt?: string;
-  endedAt?: string;
-  durationSec: number;
-};
 
 @Injectable()
 export class PbxClient {
@@ -75,11 +63,10 @@ export class PbxClient {
   }
 
   private mapCall(row: PbxCall): CallRecord {
-    const state = this.mapState(row.state);
     return {
       id: row.id,
-      direction: 'internal',
-      state,
+      direction: this.mapDirection(row.direction),
+      state: this.mapState(row.state),
       from: row.from,
       to: row.to,
       startedAt: row.startedAt,
@@ -89,18 +76,56 @@ export class PbxClient {
     };
   }
 
+  private mapDirection(direction: string): CallDirection {
+    switch (direction) {
+      case CallDirection.Inbound:
+        return CallDirection.Inbound;
+      case CallDirection.Outbound:
+        return CallDirection.Outbound;
+      case CallDirection.Internal:
+        return CallDirection.Internal;
+      default:
+        return CallDirection.Internal;
+    }
+  }
+
   private mapState(state: string): CallState {
     switch (state) {
-      case 'ringing':
-        return 'ringing';
-      case 'answered':
-        return 'answered';
-      case 'held':
-        return 'held';
-      case 'ended':
-        return 'ended';
+      case CallState.Idle:
+        return CallState.Idle;
+      case CallState.Ringing:
+        return CallState.Ringing;
+      case CallState.Answered:
+        return CallState.Answered;
+      case CallState.Held:
+        return CallState.Held;
+      case CallState.Ended:
+        return CallState.Ended;
       default:
-        return 'ringing';
+        return CallState.Ringing;
+    }
+  }
+
+  async syncSipUsers(users: Record<string, string>): Promise<boolean> {
+    if (!this.enabled) return false;
+    try {
+      const res = await fetch(`${this.baseUrl}/v1/sip-users`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users }),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!res.ok) {
+        this.logger.warn(`PBX sync sip-users -> ${res.status}`);
+        return false;
+      }
+      this.logger.log(`SIP users sync OK (${Object.keys(users).length})`);
+      return true;
+    } catch (err) {
+      this.logger.warn(
+        `PBX sync falhou: ${err instanceof Error ? err.message : 'erro'}`,
+      );
+      return false;
     }
   }
 

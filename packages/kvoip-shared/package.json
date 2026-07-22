@@ -8,6 +8,34 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./auth": {
+      "types": "./dist/auth/index.d.ts",
+      "default": "./dist/auth/index.js"
+    },
+    "./extensions": {
+      "types": "./dist/extensions/index.d.ts",
+      "default": "./dist/extensions/index.js"
+    },
+    "./trunks": {
+      "types": "./dist/trunks/index.d.ts",
+      "default": "./dist/trunks/index.js"
+    },
+    "./calls": {
+      "types": "./dist/calls/index.d.ts",
+      "default": "./dist/calls/index.js"
+    },
+    "./dashboard": {
+      "types": "./dist/dashboard/index.d.ts",
+      "default": "./dist/dashboard/index.js"
+    },
+    "./health": {
+      "types": "./dist/health/index.d.ts",
+      "default": "./dist/health/index.js"
+    },
+    "./pbx": {
+      "types": "./dist/pbx/index.d.ts",
+      "default": "./dist/pbx/index.js"
     }
   },
   "scripts": {

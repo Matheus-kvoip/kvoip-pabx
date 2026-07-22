@@ -15,6 +15,7 @@ internal/
   dialog/          estado de diálogo
   session/         sessões de chamada
   proxy/           location / router
+  media/           RTP bridge + SDP rewrite
   routing/         dialplan
   transport/       udp/tcp/tls types
   storage/         persistência (placeholder)
@@ -32,7 +33,13 @@ docs/              notas de arquitetura
 | `SIP_ADVERTISED_HOST` | `127.0.0.1` | Host no Via (proxy) |
 | `SIP_BUFFER_SIZE` | `8192` | Buffer UDP |
 | `LOG_LEVEL` | `info` | debug/info/warn/error |
-| `SERVICE_NAME` | `kvoip-pbx` | Nome no log |
+| `SIP_AUTH_ENABLED` | `true` | Exige Digest no REGISTER |
+| `SIP_AUTH_REALM` | `kvoip.local` | Realm Digest |
+| `SIP_USERS` | `1001:kvoip123,1002:kvoip123` | user:senha |
+| `MEDIA_ENABLED` | `true` | Relay RTP (reescrita SDP) |
+| `MEDIA_BIND_HOST` | `0.0.0.0` | Bind dos sockets RTP |
+| `MEDIA_ADVERTISE_HOST` | `SIP_ADVERTISED_HOST` | IP anunciado no SDP |
+| `RTP_PORT_MIN` / `RTP_PORT_MAX` | `10000` / `20000` | Faixa de portas RTP |
 
 ## Pré-requisito
 
@@ -61,13 +68,18 @@ make build
 - Listener **UDP** com reply e **SendTo** (proxy)
 - `OPTIONS` / `REGISTER` / **INVITE proxy**
 - **API HTTP** em `:8080` para o Nest (`/health`, `/v1/registrations`, `/v1/calls`)
+- **Digest auth** no `REGISTER` (`401` + `WWW-Authenticate`)
+- **RTP relay** com reescrita de SDP (`MEDIA_ENABLED`)
 - Destino inexistente → `404 Not Found`
-- Sem auth Digest / sem RTP ainda (SDP é só retransmitido)
 
 ## Testar ligação 1001 → 1002
 
 1. Suba o PBX (`make run`)
-2. Registre dois softphones no domínio `kvoip.local` (ou IP do PBX), ramais `1001` e `1002`
+2. Registre dois softphones (MicroSIP) com senha:
+   - `1001` / `kvoip123`
+   - `1002` / `kvoip123`
+   - Domain/Realm: `kvoip.local` (ou `127.0.0.1`)
+   - Porta local do softphone ≠ 5060
 3. Do `1001`, disque `1002`
 4. No painel (`npm run dev:server` + `dev:front`), veja ramais online e chamadas ao vivo
 
@@ -81,6 +93,7 @@ make build
 
 ## Próximos passos sugeridos
 
-1. Auth Digest no REGISTER
-2. Persistência (Postgres) de ramais/CDR
-3. TCP/TLS transports
+1. Persistência (Postgres) de ramais/CDR
+2. Gravação de chamadas / DTMF
+3. Digest também no INVITE (opcional)
+4. TCP/TLS transports
