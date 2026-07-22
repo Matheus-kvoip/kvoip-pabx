@@ -1,0 +1,47 @@
+services:
+  pbx:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.pbx
+    ports:
+      - "${SIP_PORT:-5060}:5060/udp"
+    env_file:
+      - packages/kvoip-pbx/.env
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "${API_PORT:-3001}:3001"
+    env_file:
+      - packages/kvoip-server/.env
+    environment:
+      PORT: 3001
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
+    restart: unless-stopped
+
+  front:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.front
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/api}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Kvoip}
+        NEXT_PUBLIC_APP_TAGLINE: ${NEXT_PUBLIC_APP_TAGLINE:-PABX Control}
+        NEXT_PUBLIC_API_HOST_LABEL: ${NEXT_PUBLIC_API_HOST_LABEL:-localhost:3001}
+        NEXT_PUBLIC_AUTH_COOKIE: ${NEXT_PUBLIC_AUTH_COOKIE:-kvoip_token}
+    ports:
+      - "${FRONT_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/api}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Kvoip}
+      NEXT_PUBLIC_APP_TAGLINE: ${NEXT_PUBLIC_APP_TAGLINE:-PABX Control}
+      NEXT_PUBLIC_API_HOST_LABEL: ${NEXT_PUBLIC_API_HOST_LABEL:-localhost:3001}
+      AUTH_COOKIE: ${AUTH_COOKIE:-kvoip_token}
+      NEXT_PUBLIC_AUTH_COOKIE: ${NEXT_PUBLIC_AUTH_COOKIE:-kvoip_token}
+    depends_on:
+      - api
+    restart: unless-stopped

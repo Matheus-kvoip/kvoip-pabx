@@ -1,0 +1,17 @@
+FROM golang:1.22-alpine AS build
+WORKDIR /src
+COPY packages/kvoip-pbx/go.mod ./
+COPY packages/kvoip-pbx ./
+RUN go build -o /out/kvoip-pbx ./cmd/kvoip-pbx
+
+FROM alpine:3.20
+WORKDIR /app
+COPY --from=build /out/kvoip-pbx /app/kvoip-pbx
+COPY packages/kvoip-pbx/configs /app/configs
+ENV PORT_SERVER_SIP=5060
+ENV SIP_BIND_HOST=0.0.0.0
+ENV SIP_BUFFER_SIZE=2048
+ENV LOG_LEVEL=info
+ENV SERVICE_NAME=kvoip-pbx
+EXPOSE 5060/udp
+CMD ["/app/kvoip-pbx"]

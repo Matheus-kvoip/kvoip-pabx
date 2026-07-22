@@ -1,0 +1,10 @@
+bin/
+*.exe
+*.test
+.env
+.env.local
+.idea/
+.vscode/
+*.log
+.pbx.*.log
+coverage.out
