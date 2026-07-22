@@ -5,28 +5,35 @@ type BrandLogoProps = {
   priority?: boolean;
   className?: string;
   size?: 'sm' | 'md' | 'lg';
+  showName?: boolean;
 };
 
 const sizes = {
-  sm: { width: 120, height: 36 },
-  md: { width: 160, height: 48 },
-  lg: { width: 240, height: 72 },
+  sm: 40,
+  md: 64,
+  lg: 128,
 };
 
 export function BrandLogo({
   priority = false,
   className = '',
   size = 'md',
+  showName = false,
 }: BrandLogoProps) {
-  const dim = sizes[size];
+  const px = sizes[size];
   return (
-    <Image
-      src="/logo-kvoip.png"
-      alt={appConfig.appName}
-      width={dim.width}
-      height={dim.height}
-      priority={priority}
-      className={`brand-logo ${className}`.trim()}
-    />
+    <span className={`brand-mark ${className}`.trim()}>
+      <Image
+        src="/logo-kvoip.png"
+        alt={appConfig.appName}
+        width={px}
+        height={px}
+        priority={priority}
+        className="brand-logo"
+      />
+      {showName ? (
+        <span className={`brand-name brand-name-${size}`}>{appConfig.appName}</span>
+      ) : null}
+    </span>
   );
 }

@@ -13,6 +13,8 @@
     "dev:server": "npm run start:dev -w kvoip-server",
     "dev:front": "npm run dev -w kvoip-front",
     "dev:pbx": "npm run pbx:run",
+    "softphone:create": "cd packages/kvoip-softphone && flutter create . --project-name kvoip_softphone --org com.kvoip",
+    "softphone:get": "cd packages/kvoip-softphone && flutter pub get",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose stop db",
     "pbx:run": "cd packages/kvoip-pbx && go run ./cmd/kvoip-pbx",

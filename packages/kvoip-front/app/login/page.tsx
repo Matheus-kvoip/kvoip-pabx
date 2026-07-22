@@ -8,11 +8,10 @@ export default function LoginPage() {
     <div className="login-screen">
       <div className="login-stage">
         <div className="login-brand">
-          <BrandLogo size="lg" priority />
+          <BrandLogo size="lg" priority showName />
           <p className="brand-sub">{appConfig.appTagline}</p>
-          <h1>Telefonia VoIP sob controle</h1>
           <p className="login-lead">
-            Acesse o painel do PABX Virtual KVOIP: ramais, troncos SIP, filas e
+            Acesse o painel do PABX Virtual: ramais, troncos SIP, filas e
             chamadas em um só lugar.
           </p>
           <div className="login-trust product-strip">

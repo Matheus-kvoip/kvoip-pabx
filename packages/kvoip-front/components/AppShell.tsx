@@ -51,7 +51,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <BrandLogo size="sm" priority />
+          <BrandLogo size="sm" priority showName />
           <div className="brand-sub">{appConfig.appTagline}</div>
         </div>
 

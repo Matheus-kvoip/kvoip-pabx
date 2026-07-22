@@ -9,6 +9,7 @@ import type {
   LoginResponse,
   Trunk,
 } from '@kvoip/shared';
+
 import { getServerToken } from './auth-server';
 import { apiRequest } from './http';
 

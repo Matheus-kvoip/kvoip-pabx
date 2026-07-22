@@ -22,6 +22,10 @@ export const metadata: Metadata = {
   title: `${appConfig.appName} | PABX Virtual`,
   description:
     'Painel do PABX Virtual KVOIP — ramais, troncos SIP, filas e chamadas.',
+  icons: {
+    icon: '/logo-kvoip.png',
+    apple: '/logo-kvoip.png',
+  },
 };
 
 export default function RootLayout({
